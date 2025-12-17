@@ -481,4 +481,18 @@
             uploadArea.classList.add('hidden');
         }
 
-        func
+        function resetApp() {
+            state.file = null;
+            state.allData = [];
+            state.filteredData = [];
+            fileInput.value = ''; // Reset input
+            
+            uploadArea.classList.remove('hidden');
+            fileInfo.classList.add('hidden');
+            resultsArea.classList.add('hidden');
+            errorArea.classList.add('hidden');
+            noDataArea.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
