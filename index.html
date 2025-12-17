@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PayPay商品券チェッカー</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @media print {
+            body { background-color: white; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+            .print-break-inside-avoid { break-inside: avoid; }
+            
+            /* 印刷時のテーブル調整 */
+            table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+            th, td { border: 1px solid #ddd; padding: 4px 8px; }
+            th { background-color: #f3f4f6 !important; color: black !important; -webkit-print-color-adjust: exact; }
+            
+            /* 商品券金額列の強調（白黒印刷でも分かるように太字等） */
+            .highlight-col { font-weight: bold; background-color: #eee !important; -webkit-print-color-adjust: exact; }
+            
+            /* 長いテキストの折り返し */
+            .truncate-text { white-space: normal !important; overflow: visible !important; text-overflow: clip !important; }
+        }
+        
+        /* 画面表示用 */
+        .print-only { display: none; }
+        
+        /* ドラッグ&ドロップエリアのアニメーション */
+        .drag-active { border-color: #ef4444 !important; background-color: #fef2f2 !important; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 font-sans min-h-screen">
+
+    <div class="max-w-7xl mx-auto p-4 md:p-8">
+        
+        <!-- Header (画面用) -->
+        <header class="flex flex-col md:flex-row md:items-center justify-between bg-white p-6 rounded-xl shadow-sm border border-gray-100 mb-6 no-print">
+            <div>
+                <h1 class="text-2xl font-bold text-red-600 flex items-center gap-2">
+                    <i data-lucide="filter" class="w-8 h-8"></i>
+                    PayPay商品券チェッカー
+                </h1>
+                <p class="text-gray-500 mt-1 text-sm">
+                    取引CSVから「PayPay商品券」利用分のみを正確に抽出・集計します
+                </p>
+            </div>
+            <div id="file-info" class="mt-4 md:mt-0 px-4 py-2 bg-gray-100 rounded-lg text-sm flex items-center gap-2 hidden">
+                <i data-lucide="file-text" class="w-4 h-4 text-gray-500"></i>
+                <span id="file-name" class="font-medium text-gray-700 truncate max-w-[200px]"></span>
+            </div>
+        </header>
+
+        <!-- Header (印刷用) -->
+        <div class="print-only mb-6 border-b-2 border-gray-800 pb-4">
+            <h1 class="text-2xl font-bold text-gray-900 mb-2">PayPay商品券 利用実績集計表</h1>
+            <div class="flex justify-between text-sm text-gray-600">
+                <p>抽出ファイル: <span id="print-file-name"></span></p>
+                <p>出力日時: <span id="print-date"></span></p>
+            </div>
+        </div>
+
+        <!-- Upload Area -->
+        <div id="upload-area" class="bg-white p-12 rounded-xl shadow-sm border-2 border-dashed border-gray-300 hover:border-red-400 transition-colors text-center cursor-pointer no-print">
+            <input type="file" accept=".csv" id="csv-upload" class="hidden">
+            <div class="flex flex-col items-center justify-center gap-4 pointer-events-none">
+                <div class="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center">
+                    <i data-lucide="upload" class="w-8 h-8"></i>
+                </div>
+                <div>
+                    <p class="text-lg font-semibold text-gray-700">取引データをアップロード</p>
+                    <p class="text-sm text-gray-400 mt-1">PayPay管理画面からダウンロードしたCSVファイルを選択してください</p>
+                    <p class="text-xs text-gray-400 mt-2">（ドラッグ＆ドロップ対応）</p>
+                </div>
+                <span class="px-6 py-2 bg-red-600 text-white font-medium rounded-lg shadow-sm">
+                    ファイルを選択
+                </span>
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div id="loading" class="hidden text-center py-12 no-print">
+            <div class="animate-spin w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p class="text-gray-500">データを解析中...</p>
+        </div>
+
+        <!-- Error Message -->
+        <div id="error-area" class="hidden bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg flex items-center gap-3 mb-6 no-print">
+            <i data-lucide="alert-circle" class="w-5 h-5 flex-shrink-0"></i>
+            <p id="error-message"></p>
+            <button onclick="resetApp()" class="ml-auto text-sm underline hover:text-red-800">やり直す</button>
+        </div>
+
+        <!-- Results Container -->
+        <div id="results-area" class="hidden space-y-6">
+            
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 print:grid-cols-2 print:gap-4">
+                <!-- Count Card -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 print:border-2 print:border-gray-300">
+                    <div class="p-3 bg-blue-50 text-blue-600 rounded-lg no-print">
+                        <i data-lucide="check-circle" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 print:text-gray-600 print:font-semibold">抽出件数</p>
+                        <p class="text-2xl font-bold text-gray-800">
+                            <span id="summary-count">0</span> <span class="text-sm font-normal text-gray-400 print:text-gray-600">件</span>
+                        </p>
+                        <p id="summary-mixed" class="text-xs text-gray-500 mt-1 bg-gray-100 px-2 py-1 rounded inline-block print:bg-transparent print:p-0 print:mt-0 hidden">
+                            うち併用払い: <span class="font-medium text-gray-700" id="summary-mixed-count">0</span>件
+                        </p>
+                        <p id="summary-pure" class="text-xs text-gray-400 mt-1 print:text-gray-500 hidden">すべて商品券のみの支払い</p>
+                    </div>
+                </div>
+
+                <!-- Amount Card -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center gap-4 border-l-4 border-l-red-500 print:border-2 print:border-gray-300 print:border-l-4 print:border-l-black">
+                    <div class="p-3 bg-red-50 text-red-600 rounded-lg no-print">
+                        <i data-lucide="search" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 print:text-gray-600 print:font-semibold">商品券売上のみ合計</p>
+                        <p class="text-2xl font-bold text-red-600 print:text-black">¥<span id="summary-amount">0</span></p>
+                        <p class="text-xs text-gray-400 print:text-gray-500">※併用払いを除外して計算</p>
+                    </div>
+                </div>
+
+                <!-- Buttons (No Print) -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col md:flex-row items-center justify-center md:justify-end gap-3 no-print">
+                    <button onclick="window.print()" class="w-full md:w-auto px-6 py-3 bg-white text-gray-700 border border-gray-300 font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 shadow-sm">
+                        <i data-lucide="printer" class="w-4 h-4"></i>
+                        印刷する
+                    </button>
+                    <button onclick="downloadCSV()" class="w-full md:w-auto px-6 py-3 bg-gray-800 text-white font-medium rounded-lg hover:bg-gray-900 transition-colors flex items-center justify-center gap-2 shadow-md">
+                        <i data-lucide="download" class="w-4 h-4"></i>
+                        CSV保存
+                    </button>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden print:border-none print:shadow-none">
+                <div class="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center no-print">
+                    <h3 class="font-semibold text-gray-700">抽出データのプレビュー</h3>
+                    <button onclick="resetApp()" class="text-sm text-gray-500 hover:text-red-600 underline">別のファイルを読み込む</button>
+                </div>
+                
+                <div class="overflow-x-auto print:overflow-visible">
+                    <table class="w-full text-sm text-left print:text-xs">
+                        <thead class="bg-gray-50 text-gray-500 font-medium border-b border-gray-200 print:bg-gray-100 print:text-black">
+                            <tr id="table-header">
+                                <!-- ヘッダーはJSで生成 -->
+                            </tr>
+                        </thead>
+                        <tbody id="table-body" class="divide-y divide-gray-100 print:divide-gray-300">
+                            <!-- ボディはJSで生成 -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="table-footer" class="p-4 text-center text-sm text-gray-500 border-t border-gray-100 hidden no-print">
+                    <!-- 件数表示 -->
+                </div>
+            </div>
+
+        </div>
+
+        <!-- No Data State -->
+        <div id="no-data-area" class="hidden bg-white p-12 rounded-xl shadow-sm border border-gray-200 text-center no-print mt-6">
+            <div class="w-16 h-16 bg-gray-100 text-gray-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                <i data-lucide="search" class="w-8 h-8"></i>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-800">該当するデータがありません</h3>
+            <p class="text-gray-500 mt-2">
+                アップロードされたファイルには「PayPay商品券」での取引が含まれていないようです。
+            </p>
+            <button onclick="resetApp()" class="mt-6 text-sm text-red-600 font-medium hover:underline">
+                別のファイルを試す
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        // Global State
+        let state = {
+            file: null,
+            headers: [],
+            filteredData: [],
+            allData: []
+        };
+
+        // Initialize Icons
+        lucide.createIcons();
+
+        // DOM Elements
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('csv-upload');
+        const resultsArea = document.getElementById('results-area');
+        const loadingArea = document.getElementById('loading');
+        const errorArea = document.getElementById('error-area');
+        const noDataArea = document.getElementById('no-data-area');
+        const errorMessage = document.getElementById('error-message');
+        const fileInfo = document.getElementById('file-info');
+        const fileName = document.getElementById('file-name');
+        const printFileName = document.getElementById('print-file-name');
+        const printDate = document.getElementById('print-date');
+
+        // Event Listeners
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('drag-active');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('drag-active');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('drag-active');
+            if (e.dataTransfer.files.length) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // --- Core Functions ---
+
+        function handleFile(file) {
+            state.file = file;
+            fileName.textContent = file.name;
+            printFileName.textContent = file.name;
+            printDate.textContent = new Date().toLocaleString();
+            
+            // UI Update
+            uploadArea.classList.add('hidden');
+            loadingArea.classList.remove('hidden');
+            errorArea.classList.add('hidden');
+            noDataArea.classList.add('hidden');
+            resultsArea.classList.add('hidden');
+
+            const reader = new FileReader();
+            // PayPay CSV is typically Shift-JIS
+            reader.readAsText(file, 'Shift_JIS');
+
+            reader.onload = (e) => {
+                try {
+                    processData(e.target.result);
+                } catch (err) {
+                    showError(err.message || 'ファイルの読み込みに失敗しました');
+                } finally {
+                    loadingArea.classList.add('hidden');
+                }
+            };
+
+            reader.onerror = () => {
+                showError('ファイルの読み込み中にエラーが発生しました');
+                loadingArea.classList.add('hidden');
+            };
+        }
+
+        function parseCSVRow(row) {
+            const result = [];
+            let current = '';
+            let inQuote = false;
+            
+            for (let i = 0; i < row.length; i++) {
+                const char = row[i];
+                if (char === '"' && inQuote && row[i + 1] === '"') {
+                    current += '"';
+                    i++;
+                } else if (char === '"') {
+                    inQuote = !inQuote;
+                } else if (char === ',' && !inQuote) {
+                    result.push(current);
+                    current = '';
+                } else {
+                    current += char;
+                }
+            }
+            result.push(current);
+            return result;
+        }
+
+        function extractVoucherAmount(jsonString) {
+            try {
+                if (!jsonString) return 0;
+                // Clean input if necessary (sometimes CSV parsing leaves artifacts)
+                // Assuming parseCSVRow handles quotes correctly, jsonString should be valid JSON
+                const details = JSON.parse(jsonString);
+                if (!Array.isArray(details)) return 0;
+
+                const voucherItem = details.find(item => 
+                    item.paymentMethod && item.paymentMethod.includes('PayPay商品券')
+                );
+                return voucherItem ? (parseInt(voucherItem.amount, 10) || 0) : 0;
+            } catch (e) {
+                // console.warn('JSON Parse Error', e);
+                return 0;
+            }
+        }
+
+        function processData(text) {
+            const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) throw new Error('ファイルの中身が空です');
+
+            const originalHeaders = parseCSVRow(lines[0]);
+            
+            const paymentMethodIndex = originalHeaders.findIndex(h => h.includes('支払い方法'));
+            const detailIndex = originalHeaders.findIndex(h => h.includes('支払い詳細'));
+            const amountIndex = originalHeaders.findIndex(h => h.includes('取引金額'));
+
+            if (paymentMethodIndex === -1) throw new Error('CSV内に「支払い方法」列が見つかりません');
+            if (detailIndex === -1) throw new Error('CSV内に「支払い詳細」列が見つかりません');
+
+            // 新ヘッダー
+            state.headers = [...originalHeaders, 'PayPay商品券金額'];
+
+            const parsedData = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+                const rowData = parseCSVRow(lines[i]);
+                if (rowData.length === originalHeaders.length) {
+                    const rowObj = {};
+                    originalHeaders.forEach((header, index) => {
+                        rowObj[header] = rowData[index];
+                    });
+
+                    // 商品券金額抽出
+                    const detailJson = rowObj[originalHeaders[detailIndex]];
+                    const voucherAmount = extractVoucherAmount(detailJson);
+                    rowObj['PayPay商品券金額'] = voucherAmount;
+
+                    parsedData.push(rowObj);
+                }
+            }
+
+            state.allData = parsedData;
+
+            // フィルタリング
+            state.filteredData = parsedData.filter(row => {
+                const method = row[originalHeaders[paymentMethodIndex]];
+                return method && method.includes('PayPay商品券');
+            });
+
+            if (state.filteredData.length === 0) {
+                fileInfo.classList.remove('hidden');
+                noDataArea.classList.remove('hidden');
+                return;
+            }
+
+            // 集計
+            calculateSummary(state.filteredData, originalHeaders[amountIndex]);
+            
+            // 描画
+            renderResults();
+        }
+
+        function calculateSummary(data, amountKey) {
+            let totalVoucherAmount = 0;
+            let mixedPaymentCount = 0;
+
+            data.forEach(row => {
+                const voucherAmt = row['PayPay商品券金額'];
+                totalVoucherAmount += voucherAmt;
+
+                if (amountKey) {
+                    const totalAmt = parseInt(row[amountKey], 10) || 0;
+                    if (totalAmt > voucherAmt) {
+                        mixedPaymentCount++;
+                    }
+                }
+            });
+
+            document.getElementById('summary-count').textContent = data.length.toLocaleString();
+            document.getElementById('summary-amount').textContent = totalVoucherAmount.toLocaleString();
+            document.getElementById('summary-mixed-count').textContent = mixedPaymentCount.toLocaleString();
+
+            const mixedEl = document.getElementById('summary-mixed');
+            const pureEl = document.getElementById('summary-pure');
+            
+            if (mixedPaymentCount > 0) {
+                mixedEl.classList.remove('hidden');
+                pureEl.classList.add('hidden');
+            } else {
+                mixedEl.classList.add('hidden');
+                pureEl.classList.remove('hidden');
+            }
+        }
+
+        function renderResults() {
+            fileInfo.classList.remove('hidden');
+            resultsArea.classList.remove('hidden');
+
+            const thead = document.getElementById('table-header');
+            const tbody = document.getElementById('table-body');
+            const footer = document.getElementById('table-footer');
+
+            // Render Header
+            thead.innerHTML = state.headers.map(h => {
+                const isAmount = h === 'PayPay商品券金額';
+                const classes = isAmount 
+                    ? 'px-6 py-3 whitespace-nowrap bg-red-50 text-red-700 font-bold highlight-col' 
+                    : 'px-6 py-3 whitespace-nowrap print:px-2 print:py-2 print:whitespace-normal';
+                return `<th class="${classes}">${h}</th>`;
+            }).join('');
+
+            // Render Body (Show first 50 rows for preview, all for print effectively via CSS flow)
+            // For simple HTML, we'll just render all. If it's huge, we might limit.
+            // Assuming < 1000 rows for typical monthly report is fine.
+            tbody.innerHTML = state.filteredData.map(row => {
+                return `
+                    <tr class="hover:bg-gray-50 transition-colors print:break-inside-avoid">
+                        ${state.headers.map(h => {
+                            const val = row[h];
+                            const isAmount = h === 'PayPay商品券金額';
+                            const isMethod = h === '支払い方法';
+                            
+                            let content = val;
+                            if (isAmount) content = `¥${val.toLocaleString()}`;
+                            if (isMethod) content = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 print:bg-transparent print:text-black print:border print:border-gray-300">${val}</span>`;
+                            
+                            // Style
+                            let classes = 'px-6 py-3 whitespace-nowrap text-gray-700 print:px-2 print:py-2 print:break-all';
+                            if (isAmount) classes += ' bg-red-50 font-bold text-red-700 highlight-col';
+                            
+                            // Truncate logic for non-print view
+                            let cellContent = `<div class="${isAmount ? '' : 'max-w-xs truncate truncate-text'}" title="${val}">${content}</div>`;
+                            
+                            return `<td class="${classes}">${cellContent}</td>`;
+                        }).join('')}
+                    </tr>
+                `;
+            }).join('');
+
+            if (state.filteredData.length > 20) {
+                footer.textContent = `全 ${state.filteredData.length} 件を表示中`;
+                footer.classList.remove('hidden');
+            } else {
+                footer.classList.add('hidden');
+            }
+        }
+
+        function downloadCSV() {
+            if (state.filteredData.length === 0) return;
+
+            let csvContent = state.headers.join(',') + '\n';
+
+            state.filteredData.forEach(row => {
+                const rowString = state.headers.map(header => {
+                    let cell = row[header] !== undefined ? String(row[header]) : '';
+                    if (cell.includes(',') || cell.includes('\n') || cell.includes('"')) {
+                        cell = `"${cell.replace(/"/g, '""')}"`;
+                    }
+                    return cell;
+                }).join(',');
+                csvContent += rowString + '\n';
+            });
+
+            const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+            const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `PayPay商品券抽出データ_${new Date().toISOString().slice(0,10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function showError(msg) {
+            errorMessage.textContent = msg;
+            errorArea.classList.remove('hidden');
+            uploadArea.classList.add('hidden');
+        }
+
+        func
